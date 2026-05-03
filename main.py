@@ -489,12 +489,25 @@ class MCBENewsPlugin(Star):
                 elif hasattr(event, "guild_id") and event.guild_id:
                     is_group = True
                     conv_id = str(event.guild_id)
-                else:
+                elif hasattr(event, "user_id") and event.user_id:
                     # 私聊，使用 user_id
                     conv_id = str(event.user_id)
+                else:
+                    # 如果都没有，尝试使用 get_sender_id() 方法
+                    try:
+                        conv_id = str(event.get_sender_id())
+                    except:
+                        conv_id = "unknown"
             except Exception as e:
                 logger.warning(f"[MCBE新闻] 获取聊天信息失败: {e}")
-                conv_id = str(event.user_id)
+                # 尝试获取 user_id 或其他标识
+                try:
+                    if hasattr(event, "user_id") and event.user_id:
+                        conv_id = str(event.user_id)
+                    else:
+                        conv_id = str(event.get_sender_id())
+                except:
+                    conv_id = "unknown"
             
             if is_group:
                 self._add_subscription(platform, "group", conv_id)
@@ -547,11 +560,24 @@ class MCBENewsPlugin(Star):
             elif hasattr(event, "guild_id") and event.guild_id:
                 is_group = True
                 conv_id = str(event.guild_id)
-            else:
+            elif hasattr(event, "user_id") and event.user_id:
                 conv_id = str(event.user_id)
+            else:
+                # 如果都没有，尝试使用 get_sender_id() 方法
+                try:
+                    conv_id = str(event.get_sender_id())
+                except:
+                    conv_id = "unknown"
         except Exception as e:
             logger.warning(f"[MCBE新闻] 获取聊天信息失败: {e}")
-            conv_id = str(event.user_id)
+            # 尝试获取 user_id 或其他标识
+            try:
+                if hasattr(event, "user_id") and event.user_id:
+                    conv_id = str(event.user_id)
+                else:
+                    conv_id = str(event.get_sender_id())
+            except:
+                conv_id = "unknown"
         
         if is_group:
             success = self._add_subscription(platform, "group", conv_id)
@@ -582,11 +608,24 @@ class MCBENewsPlugin(Star):
             elif hasattr(event, "guild_id") and event.guild_id:
                 is_group = True
                 conv_id = str(event.guild_id)
-            else:
+            elif hasattr(event, "user_id") and event.user_id:
                 conv_id = str(event.user_id)
+            else:
+                # 如果都没有，尝试使用 get_sender_id() 方法
+                try:
+                    conv_id = str(event.get_sender_id())
+                except:
+                    conv_id = "unknown"
         except Exception as e:
             logger.warning(f"[MCBE新闻] 获取聊天信息失败: {e}")
-            conv_id = str(event.user_id)
+            # 尝试获取 user_id 或其他标识
+            try:
+                if hasattr(event, "user_id") and event.user_id:
+                    conv_id = str(event.user_id)
+                else:
+                    conv_id = str(event.get_sender_id())
+            except:
+                conv_id = "unknown"
         
         if is_group:
             # 群聊
