@@ -483,10 +483,10 @@ class MCBENewsPlugin(Star):
             
             try:
                 # 尝试获取 group_id（不同平台属性名可能不同）
-                if hasattr(event, 'group_id') and event.group_id:
+                if hasattr(event, "group_id") and event.group_id:
                     is_group = True
                     conv_id = str(event.group_id)
-                elif hasattr(event, 'guild_id') and event.guild_id:
+                elif hasattr(event, "guild_id") and event.guild_id:
                     is_group = True
                     conv_id = str(event.guild_id)
                 else:
@@ -541,10 +541,10 @@ class MCBENewsPlugin(Star):
         conv_id = ""
         
         try:
-            if hasattr(event, 'group_id') and event.group_id:
+            if hasattr(event, "group_id") and event.group_id:
                 is_group = True
                 conv_id = str(event.group_id)
-            elif hasattr(event, 'guild_id') and event.guild_id:
+            elif hasattr(event, "guild_id") and event.guild_id:
                 is_group = True
                 conv_id = str(event.guild_id)
             else:
@@ -576,10 +576,10 @@ class MCBENewsPlugin(Star):
         conv_id = ""
         
         try:
-            if hasattr(event, 'group_id') and event.group_id:
+            if hasattr(event, "group_id") and event.group_id:
                 is_group = True
                 conv_id = str(event.group_id)
-            elif hasattr(event, 'guild_id') and event.guild_id:
+            elif hasattr(event, "guild_id") and event.guild_id:
                 is_group = True
                 conv_id = str(event.guild_id)
             else:
