@@ -475,17 +475,33 @@ class MCBENewsPlugin(Star):
         # 自动订阅（如果启用）
         if self.config.get("auto_subscribe", True):
             platform = event.platform
-            group_id = event.group_id
-            user_id = event.user_id
-
-            if group_id:
-                # 群聊
-                self._add_subscription(platform, "group", str(group_id))
-                logger.info(f"[MCBE新闻] 自动订阅群聊: {platform}:group:{group_id}")
+            
+            # 判断是群聊还是私聊
+            # 直接尝试获取 group_id，如果不存在就是私聊
+            is_group = False
+            conv_id = ""
+            
+            try:
+                # 尝试获取 group_id（不同平台属性名可能不同）
+                if hasattr(event, 'group_id') and event.group_id:
+                    is_group = True
+                    conv_id = str(event.group_id)
+                elif hasattr(event, 'guild_id') and event.guild_id:
+                    is_group = True
+                    conv_id = str(event.guild_id)
+                else:
+                    # 私聊，使用 user_id
+                    conv_id = str(event.user_id)
+            except Exception as e:
+                logger.warning(f"[MCBE新闻] 获取聊天信息失败: {e}")
+                conv_id = str(event.user_id)
+            
+            if is_group:
+                self._add_subscription(platform, "group", conv_id)
+                logger.info(f"[MCBE新闻] 自动订阅群聊: {platform}:group:{conv_id}")
             else:
-                # 私聊
-                self._add_subscription(platform, "private", str(user_id))
-                logger.info(f"[MCBE新闻] 自动订阅私聊: {platform}:private:{user_id}")
+                self._add_subscription(platform, "private", conv_id)
+                logger.info(f"[MCBE新闻] 自动订阅私聊: {platform}:private:{conv_id}")
 
         yield event.plain_result("开始检查 Minecraft 官方博客新文章...")
 
@@ -519,19 +535,32 @@ class MCBENewsPlugin(Star):
     async def cmd_subscribe(self, event: AstrMessageEvent):
         """订阅 MCBe 新闻：/mcbe_news_subscribe"""
         platform = event.platform
-        group_id = event.group_id
-        user_id = event.user_id
-
-        if group_id:
-            # 群聊
-            success = self._add_subscription(platform, "group", str(group_id))
+        
+        # 判断是群聊还是私聊
+        is_group = False
+        conv_id = ""
+        
+        try:
+            if hasattr(event, 'group_id') and event.group_id:
+                is_group = True
+                conv_id = str(event.group_id)
+            elif hasattr(event, 'guild_id') and event.guild_id:
+                is_group = True
+                conv_id = str(event.guild_id)
+            else:
+                conv_id = str(event.user_id)
+        except Exception as e:
+            logger.warning(f"[MCBE新闻] 获取聊天信息失败: {e}")
+            conv_id = str(event.user_id)
+        
+        if is_group:
+            success = self._add_subscription(platform, "group", conv_id)
             if success:
                 yield event.plain_result(f"✅ 已订阅 MCBe 新闻到本群")
             else:
                 yield event.plain_result("ℹ️ 本群已订阅 MCBe 新闻")
         else:
-            # 私聊
-            success = self._add_subscription(platform, "private", str(user_id))
+            success = self._add_subscription(platform, "private", conv_id)
             if success:
                 yield event.plain_result("✅ 已订阅 MCBe 新闻到本聊天")
             else:
@@ -541,19 +570,34 @@ class MCBENewsPlugin(Star):
     async def cmd_unsubscribe(self, event: AstrMessageEvent):
         """取消订阅 MCBe 新闻：/mcbe_news_unsubscribe"""
         platform = event.platform
-        group_id = event.group_id
-        user_id = event.user_id
-
-        if group_id:
+        
+        # 判断是群聊还是私聊
+        is_group = False
+        conv_id = ""
+        
+        try:
+            if hasattr(event, 'group_id') and event.group_id:
+                is_group = True
+                conv_id = str(event.group_id)
+            elif hasattr(event, 'guild_id') and event.guild_id:
+                is_group = True
+                conv_id = str(event.guild_id)
+            else:
+                conv_id = str(event.user_id)
+        except Exception as e:
+            logger.warning(f"[MCBE新闻] 获取聊天信息失败: {e}")
+            conv_id = str(event.user_id)
+        
+        if is_group:
             # 群聊
-            success = self._remove_subscription(platform, str(group_id))
+            success = self._remove_subscription(platform, conv_id)
             if success:
                 yield event.plain_result("✅ 已取消订阅 MCBe 新闻")
             else:
                 yield event.plain_result("ℹ️ 本群未订阅 MCBe 新闻")
         else:
             # 私聊
-            success = self._remove_subscription(platform, str(user_id))
+            success = self._remove_subscription(platform, conv_id)
             if success:
                 yield event.plain_result("✅ 已取消订阅 MCBe 新闻")
             else:
