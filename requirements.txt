@@ -1,0 +1,4 @@
+# MCBE 新闻监测插件依赖
+# 本插件依赖 feedparser 用于解析 RSS Feed
+
+feedparser>=6.0.0

@@ -1,0 +1,38 @@
+{
+  "check_interval": {
+    "description": "检测间隔（小时）",
+    "type": "float",
+    "default": 2.0,
+    "hint": "每隔多少小时检查一次新文章（支持小数，如 0.5 表示 30 分钟）"
+  },
+  "push_targets": {
+    "description": "推送目标列表（逗号分隔）",
+    "type": "text",
+    "default": "",
+    "hint": "推送目标，格式为 platform:user_id 或 platform:group_id，多个用逗号分隔。例如：aiocqhttp:123456,aiocqhttp:789012"
+  },
+  "ai_summary": {
+    "description": "启用 AI 总结",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，使用 AI 对文章进行总结后再推送"
+  },
+  "summary_provider": {
+    "description": "总结使用的 AI 模型",
+    "type": "string",
+    "_special": "select_provider",
+    "hint": "选择用于总结文章的 AI 模型（必须是 AstrBot 已启用的模型）"
+  },
+  "max_articles_per_check": {
+    "description": "每次检查最多推送文章数",
+    "type": "int",
+    "default": 5,
+    "hint": "每次检查时，最多推送多少篇新文章（防止一次性推送过多）"
+  },
+  "notify_on_no_new": {
+    "description": "无新文章时也通知",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，即使没有新文章，也会发送一条"无新文章"的通知（用于测试）"
+  }
+}

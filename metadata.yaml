@@ -1,0 +1,14 @@
+name: astrbot_plugin_mcbe_news
+desc: 监测 Minecraft 官方博客文章发布，AI 总结并推送原文链接
+author: alone8198
+version: 1.0.0
+display_name: MCBE 官方文章监测
+short_desc: 实时监测 Minecraft 官方博客，AI 总结新文章并推送
+support_platforms:
+  - aiocqhttp
+  - telegram
+  - qq_official
+  - wecom
+  - lark
+  - dingtalk
+astrbot_version: ">=4.5.7"
