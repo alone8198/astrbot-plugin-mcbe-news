@@ -13,6 +13,7 @@ Minecraft 官方博客文章监测插件 - AstrBot
 
 import json
 import asyncio
+import requests
 from pathlib import Path
 from typing import Dict, List, Set
 from datetime import datetime, timezone
@@ -330,8 +331,16 @@ class MCBENewsPlugin(Star):
         try:
             logger.info("[MCBE新闻] 开始检查新文章...")
 
-            # 使用 feedparser 解析 RSS
-            feed = feedparser.parse(MINECRAFT_BLOG_RSS)
+            # 使用 requests 获取 RSS Feed（绕过 Cloudflare 保护）
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            
+            response = requests.get(MINECRAFT_BLOG_RSS, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            # 使用 feedparser 解析 RSS 内容
+            feed = feedparser.parse(response.text)
 
             if not feed.entries:
                 logger.warning("[MCBE新闻] RSS 解析失败或没有文章")
@@ -374,7 +383,16 @@ class MCBENewsPlugin(Star):
             最新文章字典，如果没有则返回 None
         """
         try:
-            feed = feedparser.parse(MINECRAFT_BLOG_RSS)
+            # 使用 requests 获取 RSS Feed（绕过 Cloudflare 保护）
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            
+            response = requests.get(MINECRAFT_BLOG_RSS, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            # 使用 feedparser 解析 RSS 内容
+            feed = feedparser.parse(response.text)
 
             if not feed.entries:
                 return None

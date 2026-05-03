@@ -1,4 +1,6 @@
 # MCBE 新闻监测插件依赖
 # 本插件依赖 feedparser 用于解析 RSS Feed
+# 依赖 requests 用于获取 RSS Feed（绕过 Cloudflare 保护）
 
 feedparser>=6.0.0
+requests>=2.28.0
