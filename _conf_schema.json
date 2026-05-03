@@ -34,5 +34,11 @@
     "type": "bool",
     "default": false,
     "hint": "开启后，即使没有新文章，也会发送一条无新文章的通知（用于测试）"
+  },
+  "always_push_latest": {
+    "description": "无新文章时推送最新文章",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，即使没有新文章，也会推送最新的一篇文章（带AI总结）"
   }
 }

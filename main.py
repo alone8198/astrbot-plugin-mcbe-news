@@ -54,6 +54,7 @@ class MCBENewsPlugin(Star):
 
         # 加载已推送文章 ID
         self.pushed_ids: Set[str] = self._load_pushed_ids()
+        self.last_latest_id: str = self._load_last_latest_id()
 
         # 后台任务句柄
         self._task = None
@@ -105,6 +106,22 @@ class MCBENewsPlugin(Star):
 
         if not new_articles:
             logger.info("[MCBE新闻] 没有新文章")
+
+            # 检查是否需要推送最新文章
+            if self.config.get("always_push_latest", True):
+                latest_article = await self.get_latest_article()
+                if latest_article:
+                    # 检查这篇最新文章是否已经推送过
+                    if latest_article["id"] != self.last_latest_id:
+                        logger.info(f"[MCBE新闻] 推送最新文章: {latest_article['title']}")
+                        await self._push_article(latest_article, is_latest=True)
+                        self.last_latest_id = latest_article["id"]
+                        self._save_pushed_ids()
+                    else:
+                        logger.info("[MCBE新闻] 最新文章已推送过，跳过")
+                else:
+                    logger.warning("[MCBE新闻] 获取最新文章失败")
+
             if self.config.get("notify_on_no_new", False):
                 logger.info("[MCBE新闻] 无新文章通知已启用，但功能待实现")
             return
@@ -118,21 +135,7 @@ class MCBENewsPlugin(Star):
         targets = [t.strip() for t in push_targets_str.split(",") if t.strip()]
 
         for article in new_articles:
-            # AI 总结
-            summary = await self.summarize_article(article)
-
-            # 格式化消息
-            message = await self.format_article_message(article, summary)
-
-            # 推送到所有目标
-            for target in targets:
-                try:
-                    logger.info(f"[MCBE新闻] 准备推送到: {target}")
-                    # 注意：需要根据 AstrBot 的 API 来实现推送
-                    # 这里先记录日志
-                    logger.info(f"[MCBE新闻] 消息内容: {message[:100]}...")
-                except Exception as e:
-                    logger.error(f"[MCBE新闻] 推送到 {target} 失败: {e}")
+            await self._push_article(article, is_latest=False)
 
             # 记录已推送
             self.pushed_ids.add(article["id"])
@@ -143,6 +146,37 @@ class MCBENewsPlugin(Star):
 
         logger.info(f"[MCBE新闻] 已完成 {len(new_articles)} 篇新文章的推送")
 
+    async def _push_article(self, article: Dict, is_latest: bool = False):
+        """
+        推送单篇文章。
+
+        Args:
+            article: 文章信息字典
+            is_latest: 是否为最新文章（非新发布）
+        """
+        # AI 总结
+        summary = await self.summarize_article(article)
+
+        # 格式化消息
+        message = await self.format_article_message(article, summary, is_latest)
+
+        # 获取推送目标
+        push_targets_str = self.config.get("push_targets", "")
+        if not push_targets_str:
+            return
+
+        targets = [t.strip() for t in push_targets_str.split(",") if t.strip()]
+
+        # 推送到所有目标
+        for target in targets:
+            try:
+                logger.info(f"[MCBE新闻] 准备推送到: {target}")
+                # 注意：需要根据 AstrBot 的 API 来实现推送
+                # 这里先记录日志
+                logger.info(f"[MCBE新闻] 消息内容: {message[:100]}...")
+            except Exception as e:
+                logger.error(f"[MCBE新闻] 推送到 {target} 失败: {e}")
+
     def _load_pushed_ids(self) -> Set[str]:
         """加载已推送文章的 ID。"""
         if not self.pushed_file.exists():
@@ -151,18 +185,32 @@ class MCBENewsPlugin(Star):
         try:
             with open(self.pushed_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                self.last_latest_id = data.get("last_latest_id", "")
                 return set(data.get("pushed_ids", []))
         except Exception as e:
             logger.error(f"[MCBE新闻] 加载已推送记录失败: {e}")
             return set()
 
+    def _load_last_latest_id(self) -> str:
+        """加载上次推送的最新文章 ID。"""
+        if not self.pushed_file.exists():
+            return ""
+        try:
+            with open(self.pushed_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("last_latest_id", "")
+        except Exception as e:
+            logger.error(f"[MCBE新闻] 加载 last_latest_id 失败: {e}")
+            return ""
+
     def _save_pushed_ids(self):
-        """保存已推送文章的 ID。"""
+        """保存已推送文章的 ID 和最后推送的最新文章 ID。"""
         try:
             with open(self.pushed_file, "w", encoding="utf-8") as f:
                 json.dump(
                     {
                         "pushed_ids": list(self.pushed_ids),
+                        "last_latest_id": self.last_latest_id,
                         "last_update": datetime.now(timezone.utc).isoformat(),
                     },
                     f,
@@ -218,6 +266,34 @@ class MCBENewsPlugin(Star):
             logger.error(f"[MCBE新闻] 检查新文章失败: {e}")
             return []
 
+    async def get_latest_article(self) -> Dict:
+        """
+        获取最新的一篇文章（不管是否已推送）。
+
+        Returns:
+            最新文章字典，如果没有则返回 None
+        """
+        try:
+            feed = feedparser.parse(MINECRAFT_BLOG_RSS)
+
+            if not feed.entries:
+                return None
+
+            entry = feed.entries[0]  # 第一篇文章是最新的
+            article_id = entry.get("id", entry.get("link", ""))
+
+            return {
+                "title": entry.get("title", "无标题"),
+                "link": entry.get("link", ""),
+                "published": entry.get("published", ""),
+                "summary": entry.get("summary", ""),
+                "id": article_id,
+            }
+
+        except Exception as e:
+            logger.error(f"[MCBE新闻] 获取最新文章失败: {e}")
+            return None
+
     async def summarize_article(self, article: Dict) -> str:
         """
         使用 AI 总结文章。
@@ -264,10 +340,11 @@ class MCBENewsPlugin(Star):
             logger.error(f"[MCBE新闻] AI 总结失败: {e}")
             return article.get("summary", "")[:200]
 
-    async def format_article_message(self, article: Dict, summary: str) -> str:
+    async def format_article_message(self, article: Dict, summary: str, is_latest: bool = False) -> str:
         """格式化文章消息。"""
+        prefix = "【Minecraft 最新文章】" if is_latest else "【Minecraft 官方新文章】"
         return (
-            f"【Minecraft 官方新文章】\n"
+            f"{prefix}\n"
             f"📝 标题：{article['title']}\n"
             f"🕐 发布时间：{article['published']}\n\n"
             f"🤖 AI 总结：\n{summary}\n\n"
@@ -282,6 +359,14 @@ class MCBENewsPlugin(Star):
         new_articles = await self.check_new_articles()
 
         if not new_articles:
+            # 没有新文章，检查是否需要推送最新文章
+            if self.config.get("always_push_latest", True):
+                latest_article = await self.get_latest_article()
+                if latest_article:
+                    summary = await self.summarize_article(latest_article)
+                    message = await self.format_article_message(latest_article, summary, is_latest=True)
+                    yield event.plain_result(message)
+                    return
             yield event.plain_result("没有发现新文章。")
             return
 
@@ -289,7 +374,7 @@ class MCBENewsPlugin(Star):
 
         for article in new_articles:
             summary = await self.summarize_article(article)
-            message = await self.format_article_message(article, summary)
+            message = await self.format_article_message(article, summary, is_latest=False)
 
             yield event.plain_result(message)
 
