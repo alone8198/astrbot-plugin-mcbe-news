@@ -5,12 +5,6 @@
     "default": 2.0,
     "hint": "每隔多少小时检查一次新文章（支持小数，如 0.5 表示 30 分钟）"
   },
-  "push_targets": {
-    "description": "推送目标列表（逗号分隔）",
-    "type": "text",
-    "default": "",
-    "hint": "推送目标，格式为 platform:user_id 或 platform:group_id，多个用逗号分隔。例如：aiocqhttp:123456,aiocqhttp:789012"
-  },
   "ai_summary": {
     "description": "启用 AI 总结",
     "type": "bool",
@@ -40,5 +34,11 @@
     "type": "bool",
     "default": true,
     "hint": "开启后，即使没有新文章，也会推送最新的一篇文章（带AI总结）"
+  },
+  "auto_subscribe": {
+    "description": "自动订阅当前聊天",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，在任意聊天中使用 /mcbe_news_check 时会自动订阅该聊天"
   }
 }

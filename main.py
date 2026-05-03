@@ -7,7 +7,7 @@ Minecraft 官方博客文章监测插件 - AstrBot
     - 定期检测 Minecraft 官方博客新文章
     - 使用 AI 对文章进行总结
     - 推送文章标题、AI 总结和原文链接
-    - 支持配置多个推送目标
+    - 自动订阅功能（使用命令自动订阅当前聊天）
     - 避免重复推送（记录已推送文章 ID）
 """
 
@@ -25,6 +25,9 @@ from astrbot.core.utils.io import get_astrbot_data_path
 
 # Minecraft 官方博客 RSS
 MINECRAFT_BLOG_RSS = "https://feedback.minecraft.net/hc/en-us/sections/360001164212.rss"
+
+# 订阅配置文件
+SUBSCRIPTIONS_FILE = "subscriptions.json"
 
 
 @register(
@@ -52,9 +55,15 @@ class MCBENewsPlugin(Star):
         # 已推送文章记录文件
         self.pushed_file = self.data_dir / "pushed_articles.json"
 
+        # 订阅配置文件
+        self.subs_file = self.data_dir / SUBSCRIPTIONS_FILE
+
         # 加载已推送文章 ID
         self.pushed_ids: Set[str] = self._load_pushed_ids()
         self.last_latest_id: str = self._load_last_latest_id()
+
+        # 加载订阅列表
+        self.subscriptions: List[Dict] = self._load_subscriptions()
 
         # 后台任务句柄
         self._task = None
@@ -64,6 +73,7 @@ class MCBENewsPlugin(Star):
         self._start_background_task()
 
         logger.info(f"[MCBE新闻] 插件已加载，已记录 {len(self.pushed_ids)} 篇已推送文章")
+        logger.info(f"[MCBE新闻] 当前订阅数：{len(self.subscriptions)}")
 
     def _start_background_task(self):
         """启动后台定时检查任务。"""
@@ -102,6 +112,11 @@ class MCBENewsPlugin(Star):
         """执行检查并推送新文章。"""
         logger.info("[MCBE新闻] 开始定时检查新文章...")
 
+        # 检查是否有订阅
+        if not self.subscriptions:
+            logger.warning("[MCBE新闻] 没有订阅的聊天，跳过推送")
+            return
+
         new_articles = await self.check_new_articles()
 
         if not new_articles:
@@ -114,7 +129,7 @@ class MCBENewsPlugin(Star):
                     # 检查这篇最新文章是否已经推送过
                     if latest_article["id"] != self.last_latest_id:
                         logger.info(f"[MCBE新闻] 推送最新文章: {latest_article['title']}")
-                        await self._push_article(latest_article, is_latest=True)
+                        await self._push_article_to_all(latest_article, is_latest=True)
                         self.last_latest_id = latest_article["id"]
                         self._save_pushed_ids()
                     else:
@@ -126,16 +141,9 @@ class MCBENewsPlugin(Star):
                 logger.info("[MCBE新闻] 无新文章通知已启用，但功能待实现")
             return
 
-        # 获取推送目标
-        push_targets_str = self.config.get("push_targets", "")
-        if not push_targets_str:
-            logger.warning("[MCBE新闻] 未配置推送目标，跳过推送")
-            return
-
-        targets = [t.strip() for t in push_targets_str.split(",") if t.strip()]
-
+        # 推送到所有订阅
         for article in new_articles:
-            await self._push_article(article, is_latest=False)
+            await self._push_article_to_all(article, is_latest=False)
 
             # 记录已推送
             self.pushed_ids.add(article["id"])
@@ -146,9 +154,9 @@ class MCBENewsPlugin(Star):
 
         logger.info(f"[MCBE新闻] 已完成 {len(new_articles)} 篇新文章的推送")
 
-    async def _push_article(self, article: Dict, is_latest: bool = False):
+    async def _push_article_to_all(self, article: Dict, is_latest: bool = False):
         """
-        推送单篇文章。
+        推送文章到所有订阅的聊天。
 
         Args:
             article: 文章信息字典
@@ -160,57 +168,104 @@ class MCBENewsPlugin(Star):
         # 格式化消息
         message = await self.format_article_message(article, summary, is_latest)
 
-        # 获取推送目标
-        push_targets_str = self.config.get("push_targets", "")
-        if not push_targets_str:
-            return
-
-        targets = [t.strip() for t in push_targets_str.split(",") if t.strip()]
-
-        # 推送到所有目标
-        for target in targets:
+        # 推送到所有订阅
+        for sub in self.subscriptions:
             try:
-                logger.info(f"[MCBE新闻] 准备推送到: {target}")
-                # 注意：需要根据 AstrBot 的 API 来实现推送
-                # 这里先记录日志
-                logger.info(f"[MCBE新闻] 消息内容: {message[:100]}...")
+                platform = sub.get("platform", "")
+                conv_type = sub.get("type", "")
+                conv_id = sub.get("id", "")
+
+                if not platform or not conv_id:
+                    continue
+
+                logger.info(f"[MCBE新闻] 推送到 {platform}:{conv_type}:{conv_id}")
+
+                # 发送消息
+                await self._send_message(platform, conv_type, conv_id, message)
+
             except Exception as e:
-                logger.error(f"[MCBE新闻] 推送到 {target} 失败: {e}")
+                logger.error(f"[MCBE新闻] 推送到 {sub} 失败: {e}")
 
-    def _load_pushed_ids(self) -> Set[str]:
-        """加载已推送文章的 ID。"""
-        if not self.pushed_file.exists():
-            return set()
+    async def _send_message(self, platform: str, conv_type: str, conv_id: str, message: str):
+        """
+        发送消息到指定聊天。
 
+        Args:
+            platform: 平台 ID（如 aiocqhttp）
+            conv_type: 聊天类型（group 或 private）
+            conv_id: 聊天 ID
+            message: 消息内容
+        """
         try:
-            with open(self.pushed_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                self.last_latest_id = data.get("last_latest_id", "")
-                return set(data.get("pushed_ids", []))
+            # 获取平台实例
+            platform_instance = self.context.get_platform(platform)
+            if not platform_instance:
+                logger.error(f"[MCBE新闻] 找不到平台: {platform}")
+                return
+
+            # 根据平台发送消息
+            if platform == "aiocqhttp":
+                await self._send_aiocqhttp_message(platform_instance, conv_type, conv_id, message)
+            else:
+                # 通用方法（其他平台）
+                logger.warning(f"[MCBE新闻] 未实现平台 {platform} 的消息发送")
+
         except Exception as e:
-            logger.error(f"[MCBE新闻] 加载已推送记录失败: {e}")
-            return set()
+            logger.error(f"[MCBE新闻] 发送消息失败: {e}")
 
-    def _load_last_latest_id(self) -> str:
-        """加载上次推送的最新文章 ID。"""
-        if not self.pushed_file.exists():
-            return ""
+    async def _send_aiocqhttp_message(self, platform, conv_type: str, conv_id: str, message: str):
+        """
+        发送消息到 aiocqhttp（QQ）平台。
+
+        Args:
+            platform: aiocqhttp 平台实例
+            conv_type: 聊天类型（group 或 private）
+            conv_id: 聊天 ID
+            message: 消息内容
+        """
         try:
-            with open(self.pushed_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("last_latest_id", "")
+            if conv_type == "group":
+                # 发送群消息
+                if hasattr(platform, "send_group_msg"):
+                    await platform.send_group_msg(group_id=int(conv_id), message=message)
+                else:
+                    logger.warning("[MCBE新闻] aiocqhttp 平台不支持 send_group_msg")
+            elif conv_type == "private":
+                # 发送私聊消息
+                if hasattr(platform, "send_private_msg"):
+                    await platform.send_private_msg(user_id=int(conv_id), message=message)
+                else:
+                    logger.warning("[MCBE新闻] aiocqhttp 平台不支持 send_private_msg")
+            else:
+                logger.error(f"[MCBE新闻] 未知的聊天类型: {conv_type}")
         except Exception as e:
-            logger.error(f"[MCBE新闻] 加载 last_latest_id 失败: {e}")
-            return ""
+            logger.error(f"[MCBE新闻] 发送 aiocqhttp 消息失败: {e}")
 
-    def _save_pushed_ids(self):
-        """保存已推送文章的 ID 和最后推送的最新文章 ID。"""
+    def _load_subscriptions(self) -> List[Dict]:
+        """
+        加载订阅列表。
+
+        Returns:
+            订阅列表，每项是 {"platform": ..., "type": ..., "id": ...}
+        """
+        if not self.subs_file.exists():
+            return []
+
         try:
-            with open(self.pushed_file, "w", encoding="utf-8") as f:
+            with open(self.subs_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("subscriptions", [])
+        except Exception as e:
+            logger.error(f"[MCBE新闻] 加载订阅列表失败: {e}")
+            return []
+
+    def _save_subscriptions(self):
+        """保存订阅列表。"""
+        try:
+            with open(self.subs_file, "w", encoding="utf-8") as f:
                 json.dump(
                     {
-                        "pushed_ids": list(self.pushed_ids),
-                        "last_latest_id": self.last_latest_id,
+                        "subscriptions": self.subscriptions,
                         "last_update": datetime.now(timezone.utc).isoformat(),
                     },
                     f,
@@ -218,7 +273,52 @@ class MCBENewsPlugin(Star):
                     indent=2,
                 )
         except Exception as e:
-            logger.error(f"[MCBE新闻] 保存已推送记录失败: {e}")
+            logger.error(f"[MCBE新闻] 保存订阅列表失败: {e}")
+
+    def _add_subscription(self, platform: str, conv_type: str, conv_id: str) -> bool:
+        """
+        添加订阅。
+
+        Args:
+            platform: 平台 ID
+            conv_type: 聊天类型（group 或 private）
+            conv_id: 聊天 ID
+
+        Returns:
+            是否添加成功（如果已存在则返回 False）
+        """
+        # 检查是否已订阅
+        for sub in self.subscriptions:
+            if sub.get("platform") == platform and sub.get("id") == conv_id:
+                return False
+
+        # 添加订阅
+        self.subscriptions.append({
+            "platform": platform,
+            "type": conv_type,
+            "id": conv_id,
+        })
+        self._save_subscriptions()
+        return True
+
+    def _remove_subscription(self, platform: str, conv_id: str) -> bool:
+        """
+        移除订阅。
+
+        Args:
+            platform: 平台 ID
+            conv_id: 聊天 ID
+
+        Returns:
+            是否移除成功（如果不存在则返回 False）
+        """
+        for i, sub in enumerate(self.subscriptions):
+            if sub.get("platform") == platform and sub.get("id") == conv_id:
+                del self.subscriptions[i]
+                self._save_subscriptions()
+                return True
+
+        return False
 
     async def check_new_articles(self) -> List[Dict]:
         """
@@ -354,6 +454,21 @@ class MCBENewsPlugin(Star):
     @filter.command("mcbe_news_check")
     async def cmd_check_now(self, event: AstrMessageEvent):
         """手动检查新文章：/mcbe_news_check"""
+        # 自动订阅（如果启用）
+        if self.config.get("auto_subscribe", True):
+            platform = event.platform
+            group_id = event.group_id
+            user_id = event.user_id
+
+            if group_id:
+                # 群聊
+                self._add_subscription(platform, "group", str(group_id))
+                logger.info(f"[MCBE新闻] 自动订阅群聊: {platform}:group:{group_id}")
+            else:
+                # 私聊
+                self._add_subscription(platform, "private", str(user_id))
+                logger.info(f"[MCBE新闻] 自动订阅私聊: {platform}:private:{user_id}")
+
         yield event.plain_result("开始检查 Minecraft 官方博客新文章...")
 
         new_articles = await self.check_new_articles()
@@ -382,6 +497,50 @@ class MCBENewsPlugin(Star):
             self.pushed_ids.add(article["id"])
             self._save_pushed_ids()
 
+    @filter.command("mcbe_news_subscribe")
+    async def cmd_subscribe(self, event: AstrMessageEvent):
+        """订阅 MCBe 新闻：/mcbe_news_subscribe"""
+        platform = event.platform
+        group_id = event.group_id
+        user_id = event.user_id
+
+        if group_id:
+            # 群聊
+            success = self._add_subscription(platform, "group", str(group_id))
+            if success:
+                yield event.plain_result(f"✅ 已订阅 MCBe 新闻到本群")
+            else:
+                yield event.plain_result("ℹ️ 本群已订阅 MCBe 新闻")
+        else:
+            # 私聊
+            success = self._add_subscription(platform, "private", str(user_id))
+            if success:
+                yield event.plain_result("✅ 已订阅 MCBe 新闻到本聊天")
+            else:
+                yield event.plain_result("ℹ️ 本聊天已订阅 MCBe 新闻")
+
+    @filter.command("mcbe_news_unsubscribe")
+    async def cmd_unsubscribe(self, event: AstrMessageEvent):
+        """取消订阅 MCBe 新闻：/mcbe_news_unsubscribe"""
+        platform = event.platform
+        group_id = event.group_id
+        user_id = event.user_id
+
+        if group_id:
+            # 群聊
+            success = self._remove_subscription(platform, str(group_id))
+            if success:
+                yield event.plain_result("✅ 已取消订阅 MCBe 新闻")
+            else:
+                yield event.plain_result("ℹ️ 本群未订阅 MCBe 新闻")
+        else:
+            # 私聊
+            success = self._remove_subscription(platform, str(user_id))
+            if success:
+                yield event.plain_result("✅ 已取消订阅 MCBe 新闻")
+            else:
+                yield event.plain_result("ℹ️ 本聊天未订阅 MCBe 新闻")
+
     @filter.command("mcbe_news_status")
     async def cmd_status(self, event: AstrMessageEvent):
         """查看插件状态：/mcbe_news_status"""
@@ -390,16 +549,74 @@ class MCBENewsPlugin(Star):
             f"📊 已记录文章数：{len(self.pushed_ids)}\n"
             f"⏰ 检测间隔：{self.config.get('check_interval', 2)} 小时\n"
             f"🤖 AI 总结：{'✅ 开启' if self.config.get('ai_summary', True) else '❌ 关闭'}\n"
-            f"📬 推送目标：{self.config.get('push_targets', '未配置')}"
+            f"📬 订阅数：{len(self.subscriptions)}\n"
+            f"🔔 自动订阅：{'✅ 开启' if self.config.get('auto_subscribe', True) else '❌ 关闭'}"
         )
         yield event.plain_result(status)
+
+    @filter.command("mcbe_news_list")
+    async def cmd_list_subscriptions(self, event: AstrMessageEvent):
+        """查看订阅列表：/mcbe_news_list"""
+        if not self.subscriptions:
+            yield event.plain_result("当前没有订阅")
+            return
+
+        msg = "【订阅列表】\n"
+        for i, sub in enumerate(self.subscriptions, 1):
+            msg += f"{i}. {sub['platform']}:{sub['type']}:{sub['id']}\n"
+
+        yield event.plain_result(msg)
 
     @filter.command("mcbe_news_clear")
     async def cmd_clear(self, event: AstrMessageEvent):
         """清除已推送记录（重新推送）：/mcbe_news_clear"""
         self.pushed_ids.clear()
+        self.last_latest_id = ""
         self._save_pushed_ids()
         yield event.plain_result("已清除所有已推送记录，下次检查会重新推送。")
+
+    def _load_pushed_ids(self) -> Set[str]:
+        """加载已推送文章的 ID。"""
+        if not self.pushed_file.exists():
+            return set()
+
+        try:
+            with open(self.pushed_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.last_latest_id = data.get("last_latest_id", "")
+                return set(data.get("pushed_ids", []))
+        except Exception as e:
+            logger.error(f"[MCBE新闻] 加载已推送记录失败: {e}")
+            return set()
+
+    def _load_last_latest_id(self) -> str:
+        """加载上次推送的最新文章 ID。"""
+        if not self.pushed_file.exists():
+            return ""
+        try:
+            with open(self.pushed_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("last_latest_id", "")
+        except Exception as e:
+            logger.error(f"[MCBE新闻] 加载 last_latest_id 失败: {e}")
+            return ""
+
+    def _save_pushed_ids(self):
+        """保存已推送文章的 ID 和最后推送的最新文章 ID。"""
+        try:
+            with open(self.pushed_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "pushed_ids": list(self.pushed_ids),
+                        "last_latest_id": self.last_latest_id,
+                        "last_update": datetime.now(timezone.utc).isoformat(),
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        except Exception as e:
+            logger.error(f"[MCBE新闻] 保存已推送记录失败: {e}")
 
     async def terminate(self):
         """插件卸载时调用，清理后台任务。"""
