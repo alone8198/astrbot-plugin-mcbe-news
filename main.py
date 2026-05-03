@@ -55,7 +55,93 @@ class MCBENewsPlugin(Star):
         # 加载已推送文章 ID
         self.pushed_ids: Set[str] = self._load_pushed_ids()
 
+        # 后台任务句柄
+        self._task = None
+        self._running = False
+
+        # 启动后台定时检查任务
+        self._start_background_task()
+
         logger.info(f"[MCBE新闻] 插件已加载，已记录 {len(self.pushed_ids)} 篇已推送文章")
+
+    def _start_background_task(self):
+        """启动后台定时检查任务。"""
+        if self._task is not None:
+            return
+
+        self._running = True
+        self._task = asyncio.create_task(self._background_loop())
+        logger.info("[MCBE新闻] 后台定时检查任务已启动")
+
+    async def _background_loop(self):
+        """后台循环，定期检查新文章。"""
+        while self._running:
+            try:
+                # 读取配置的检测间隔（小时）
+                check_interval = float(self.config.get("check_interval", 2.0))
+                check_interval_seconds = check_interval * 3600
+
+                logger.info(f"[MCBE新闻] 下次检查在 {check_interval} 小时后")
+
+                # 等待指定时间
+                await asyncio.sleep(check_interval_seconds)
+
+                # 执行检查
+                if self._running:
+                    await self._do_check_and_push()
+
+            except asyncio.CancelledError:
+                logger.info("[MCBE新闻] 后台任务被取消")
+                break
+            except Exception as e:
+                logger.error(f"[MCBE新闻] 后台任务出错: {e}")
+                await asyncio.sleep(60)  # 出错后等待 1 分钟再试
+
+    async def _do_check_and_push(self):
+        """执行检查并推送新文章。"""
+        logger.info("[MCBE新闻] 开始定时检查新文章...")
+
+        new_articles = await self.check_new_articles()
+
+        if not new_articles:
+            logger.info("[MCBE新闻] 没有新文章")
+            if self.config.get("notify_on_no_new", False):
+                logger.info("[MCBE新闻] 无新文章通知已启用，但功能待实现")
+            return
+
+        # 获取推送目标
+        push_targets_str = self.config.get("push_targets", "")
+        if not push_targets_str:
+            logger.warning("[MCBE新闻] 未配置推送目标，跳过推送")
+            return
+
+        targets = [t.strip() for t in push_targets_str.split(",") if t.strip()]
+
+        for article in new_articles:
+            # AI 总结
+            summary = await self.summarize_article(article)
+
+            # 格式化消息
+            message = await self.format_article_message(article, summary)
+
+            # 推送到所有目标
+            for target in targets:
+                try:
+                    logger.info(f"[MCBE新闻] 准备推送到: {target}")
+                    # 注意：需要根据 AstrBot 的 API 来实现推送
+                    # 这里先记录日志
+                    logger.info(f"[MCBE新闻] 消息内容: {message[:100]}...")
+                except Exception as e:
+                    logger.error(f"[MCBE新闻] 推送到 {target} 失败: {e}")
+
+            # 记录已推送
+            self.pushed_ids.add(article["id"])
+            self._save_pushed_ids()
+
+            # 避免频率限制
+            await asyncio.sleep(1)
+
+        logger.info(f"[MCBE新闻] 已完成 {len(new_articles)} 篇新文章的推送")
 
     def _load_pushed_ids(self) -> Set[str]:
         """加载已推送文章的 ID。"""
@@ -183,57 +269,10 @@ class MCBENewsPlugin(Star):
         return (
             f"【Minecraft 官方新文章】\n"
             f"📝 标题：{article['title']}\n"
-            f"🕒 发布时间：{article['published']}\n\n"
+            f"🕐 发布时间：{article['published']}\n\n"
             f"🤖 AI 总结：\n{summary}\n\n"
             f"🔗 原文链接：{article['link']}"
         )
-
-    @filter.scheduled_job(trigger="interval", hours=2)
-    async def scheduled_check(self):
-        """定时检查新文章（每 2 小时）。"""
-        logger.info("[MCBE新闻] 定时任务触发，开始检查新文章...")
-
-        new_articles = await self.check_new_articles()
-
-        if not new_articles:
-            logger.info("[MCBE新闻] 没有新文章")
-            if self.config.get("notify_on_no_new", False):
-                logger.info("[MCBE新闻] 无新文章通知已启用，但功能待实现")
-            return
-
-        # 获取推送目标
-        push_targets_str = self.config.get("push_targets", "")
-        if not push_targets_str:
-            logger.warning("[MCBE新闻] 未配置推送目标，跳过推送")
-            return
-
-        targets = [t.strip() for t in push_targets_str.split(",") if t.strip()]
-
-        for article in new_articles:
-            # AI 总结
-            summary = await self.summarize_article(article)
-
-            # 格式化消息
-            message = await self.format_article_message(article, summary)
-
-            # 推送到所有目标
-            for target in targets:
-                try:
-                    logger.info(f"[MCBE新闻] 准备推送到: {target}")
-                    # 注意：这里需要根据 AstrBot 的 API 来实现推送
-                    # 目前先记录日志，等待用户配置正确的推送方式
-                    logger.info(f"[MCBE新闻] 消息内容: {message[:100]}...")
-                except Exception as e:
-                    logger.error(f"[MCBE新闻] 推送到 {target} 失败: {e}")
-
-            # 记录已推送
-            self.pushed_ids.add(article["id"])
-            self._save_pushed_ids()
-
-            # 避免频率限制
-            await asyncio.sleep(1)
-
-        logger.info(f"[MCBE新闻] 已完成 {len(new_articles)} 篇新文章的推送")
 
     @filter.command("mcbe_news_check")
     async def cmd_check_now(self, event: AstrMessageEvent):
@@ -276,3 +315,14 @@ class MCBENewsPlugin(Star):
         self.pushed_ids.clear()
         self._save_pushed_ids()
         yield event.plain_result("已清除所有已推送记录，下次检查会重新推送。")
+
+    async def terminate(self):
+        """插件卸载时调用，清理后台任务。"""
+        self._running = False
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.info("[MCBE新闻] 后台任务已停止")
